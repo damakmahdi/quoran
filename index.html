@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>مخطط علاقات النص القرآني</title>
+  <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      display: grid;
+      grid-template-columns: 1fr 410px;
+      height: 100vh;
+    }
+    #cy {
+      width: 100%;
+      height: 100%;
+      background: #111827;
+    }
+    aside {
+      background: #1e293b;
+      border-right: 1px solid #334155;
+      padding: 16px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    h1 { font-size: 1.15rem; margin: 0; color: #f8fafc; }
+    .controls { display: flex; flex-direction: column; gap: 8px; }
+    input, select, button {
+      padding: 8px 10px;
+      border-radius: 6px;
+      border: 1px solid #475569;
+      background: #0f172a;
+      color: #f8fafc;
+      font-size: 0.95rem;
+    }
+    button { cursor: pointer; background: #2563eb; border-color: #2563eb; }
+    button:hover { background: #1d4ed8; }
+    .status { font-size: 0.85rem; color: #94a3b8; }
+    .card {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .detail-meta {
+      margin-top: 8px;
+      font-size: 0.92rem;
+      line-height: 1.65;
+      color: #cbd5e1;
+      white-space: pre-wrap;
+    }
+    .rel-box {
+      border: 1px solid #334155;
+      background: #111827;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-top: 10px;
+      font-size: 0.92rem;
+    }
+    .rel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      padding-bottom: 6px;
+      margin-bottom: 8px;
+      border-bottom: 1px solid #1e293b;
+    }
+    .rel-actors {
+      font-weight: 700;
+      color: #f8fafc;
+      font-size: 0.98rem;
+    }
+    .rel-tag {
+      display: inline-block;
+      font-size: 0.78rem;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #1e3a8a;
+      color: #bfdbfe;
+      white-space: nowrap;
+    }
+    .rel-action {
+      color: #e2e8f0;
+      line-height: 1.7;
+      margin-bottom: 6px;
+    }
+    .rel-verses {
+      font-size: 0.84rem;
+      color: #38bdf8;
+    }
+    .verse-item {
+      border-bottom: 1px solid #1e293b;
+      padding: 8px 0;
+      font-size: 1.02rem;
+      line-height: 1.85;
+    }
+    .verse-ref {
+      display: inline-block;
+      font-size: 0.82rem;
+      color: #38bdf8;
+      margin-left: 6px;
+    }
+  </style>
+</head>
+<body>
+  <div id="cy"></div>
+  <aside>
+    <h1>شبكة العلاقات من النص</h1>
+    <div class="controls">
+      <input id="searchInput" type="text" placeholder="ابحث عن اسم أو علاقة..." />
+      <select id="linkTypeFilter">
+        <option value="all">كل الروابط (مباشر وغير مباشر)</option>
+        <option value="direct">روابط مباشرة فقط</option>
+        <option value="indirect">روابط غير مباشرة فقط</option>
+      </select>
+      <button id="resetBtn" type="button">إعادة ضبط العرض</button>
+    </div>
+    <div id="status" class="status">جاري تحميل البيانات...</div>
+    <div id="inspector" class="card">
+      <strong>التفاصيل والآيات المرتبطة</strong>
+      <div id="detailsText" class="detail-meta">اختر عقدة أو رابطاً من المخطط لعرض الأطراف والروابط والآيات.</div>
+      <div id="relationsList"></div>
+      <div id="versesList"></div>
+    </div>
+  </aside>
+
+  <script>
+    const SURAH_NAMES = {
+      1: "الفاتحة", 2: "البقرة", 3: "آل عمران", 4: "النساء", 5: "المائدة",
+      6: "الأنعام", 7: "الأعراف", 8: "الأنفال", 9: "التوبة", 10: "يونس",
+      11: "هود", 12: "يوسف", 13: "الرعد", 14: "إبراهيم", 15: "الحجر",
+      16: "النحل", 17: "الإسراء", 18: "الكهف", 19: "مريم", 20: "طه",
+      21: "الأنبياء", 22: "الحج", 23: "المؤمنون", 24: "النور", 25: "الفرقان",
+      26: "الشعراء", 27: "النمل", 28: "القصص", 29: "العنكبوت", 30: "الروم",
+      31: "لقمان", 32: "السجدة", 33: "الأحزاب", 34: "سبأ", 35: "فاطر",
+      36: "يس", 37: "الصافات", 38: "ص", 39: "الزمر", 40: "غافر",
+      41: "فصلت", 42: "الشورى", 43: "الزخرف", 44: "الدخان", 45: "الجاثية",
+      46: "الأحقاف", 47: "محمد", 48: "الفتح", 49: "الحجرات", 50: "ق",
+      51: "الذاريات", 52: "الطور", 53: "النجم", 54: "القمر", 55: "الرحمن",
+      56: "الواقعة", 57: "الحديد", 58: "المجادلة", 59: "الحشر", 60: "الممتحنة",
+      61: "الصف", 62: "الجمعة", 63: "المنافقون", 64: "التغابن", 65: "الطلاق",
+      66: "التحريم", 67: "الملك", 68: "القلم", 69: "الحاقة", 70: "المعارج",
+      71: "نوح", 72: "الجن", 73: "المزمل", 74: "المدثر", 75: "القيامة",
+      76: "الإنسان", 77: "المرسلات", 78: "النبأ", 79: "النازعات", 80: "عبس",
+      81: "التكوير", 82: "الانفطار", 83: "المطففين", 84: "الانشقاق", 85: "البروج",
+      86: "الطارق", 87: "الأعلى", 88: "الغاشية", 89: "الفجر", 90: "البلد",
+      91: "الشمس", 92: "الليل", 93: "الضحى", 94: "الشرح", 95: "التين",
+      96: "العلق", 97: "القدر", 98: "البينة", 99: "الزلزلة", 100: "العاديات",
+      101: "القارعة", 102: "التكاثر", 103: "العصر", 104: "الهمزة", 105: "الفيل",
+      106: "قريش", 107: "الماعون", 108: "الكوثر", 109: "الكافرون", 110: "النصر",
+      111: "المسد", 112: "الإخلاص", 113: "الفلق", 114: "الناس"
+    };
+
+    function formatVerseRef(vid) {
+      const parts = String(vid || "").trim().split(":");
+      if (parts.length !== 2) return String(vid || "");
+      const surahNum = Number(parts[0]);
+      const ayahNum = parts[1];
+      const surahName = SURAH_NAMES[surahNum];
+      return surahName ? `${surahName}: ${ayahNum}` : String(vid);
+    }
+
+    const fallbackGraph = {
+      nodes: [
+        { id: "موسى", label: "موسى", category: "نبي" },
+        { id: "فرعون", label: "فرعون", category: "شخصية" },
+        { id: "هارون", label: "هارون", category: "نبي" }
+      ],
+      edges: [
+        {
+          id: "e1",
+          source: "موسى",
+          target: "فرعون",
+          action: "رسالة ودعوة",
+          direct: true,
+          verses: ["20:43", "20:44"]
+        },
+        {
+          id: "e2",
+          source: "موسى",
+          target: "هارون",
+          action: "مؤازرة",
+          direct: true,
+          verses: ["20:29", "20:30"]
+        }
+      ]
+    };
+
+    const HIGHLIGHT_COLOR = "#f97316";
+    const NODE_DIAMETER = 52;
+    const MIN_GAP = 46;
+    let versesById = {};
+    let cy;
+    let selectedAnchorNodeId = null;
+
+    function buildMergedElements(graphData) {
+      const els = [];
+      const nodeIds = new Set();
+
+      for (const n of graphData.nodes || []) {
+        const id = String(n.id || "").trim();
+        if (!id || nodeIds.has(id)) continue;
+        nodeIds.add(id);
+        els.push({
+          group: "nodes",
+          data: {
+            id,
+            label: n.label || id,
+            category: n.category || "كيان"
+          }
+        });
+      }
+
+      const pairMap = new Map();
+      for (const e of graphData.edges || []) {
+        const src = String(e.source || "").trim();
+        const tgt = String(e.target || "").trim();
+        if (!src || !tgt) continue;
+        if (!nodeIds.has(src)) {
+          nodeIds.add(src);
+          els.push({ group: "nodes", data: { id: src, label: src, category: "كيان" } });
+        }
+        if (!nodeIds.has(tgt)) {
+          nodeIds.add(tgt);
+          els.push({ group: "nodes", data: { id: tgt, label: tgt, category: "كيان" } });
+        }
+
+        const pairKey = `${src}|||${tgt}`;
+        if (!pairMap.has(pairKey)) {
+          pairMap.set(pairKey, {
+            id: `edge_${pairMap.size + 1}`,
+            source: src,
+            target: tgt,
+            relations: [],
+            allVerses: [],
+            hasDirect: false,
+            hasIndirect: false
+          });
+        }
+        const entry = pairMap.get(pairKey);
+        const relItem = {
+          source: src,
+          target: tgt,
+          action: String(e.action || "").replace(/\s+/g, " ").trim(),
+          direct: Boolean(e.direct),
+          verses: Array.isArray(e.verses) ? e.verses : []
+        };
+        entry.relations.push(relItem);
+        if (relItem.direct) entry.hasDirect = true;
+        else entry.hasIndirect = true;
+
+        for (const vid of relItem.verses) {
+          if (vid && !entry.allVerses.includes(vid)) {
+            entry.allVerses.push(vid);
+          }
+        }
+      }
+
+      for (const entry of pairMap.values()) {
+        const allActionsText = entry.relations.map((r) => r.action).join(" ");
+        els.push({
+          group: "edges",
+          data: {
+            id: entry.id,
+            source: entry.source,
+            target: entry.target,
+            relations: entry.relations,
+            count: entry.relations.length,
+            allActionsText,
+            hasDirect: entry.hasDirect,
+            hasIndirect: entry.hasIndirect,
+            verses: entry.allVerses
+          }
+        });
+      }
+
+      return els;
+    }
+
+    function escapeHtml(str) {
+      return String(str || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function renderRelations(relations) {
+      const container = document.getElementById("relationsList");
+      container.innerHTML = "";
+      if (!relations || relations.length === 0) return;
+
+      relations.forEach((r, idx) => {
+        const box = document.createElement("div");
+        box.className = "rel-box";
+        const kind = r.direct ? "مباشر" : "غير مباشر";
+        const vStr = (r.verses || []).map(formatVerseRef).join(" ، ");
+        const actors = `${escapeHtml(r.source)} ← ${escapeHtml(r.target)}`;
+        box.innerHTML =
+          `<div class="rel-header">` +
+            `<span class="rel-actors">${actors}</span>` +
+            `<span class="rel-tag">#${idx + 1} • ${kind}</span>` +
+          `</div>` +
+          `<div class="rel-action">${escapeHtml(r.action || "—")}</div>` +
+          `<div class="rel-verses">الآيات: ${escapeHtml(vStr || "—")}</div>`;
+        container.appendChild(box);
+      });
+    }
+
+    function renderVerses(verseIds) {
+      const container = document.getElementById("versesList");
+      container.innerHTML = "";
+      if (!verseIds || verseIds.length === 0) return;
+
+      const title = document.createElement("div");
+      title.className = "status";
+      title.style.marginTop = "12px";
+      title.textContent = "نصوص الآيات المرتبطة:";
+      container.appendChild(title);
+
+      for (const vid of verseIds) {
+        const v = versesById[vid];
+        const div = document.createElement("div");
+        div.className = "verse-item";
+        div.innerHTML = `<span class="verse-ref">[${escapeHtml(formatVerseRef(vid))}]</span>${escapeHtml(v ? v.text_ar : "الآية غير موجودة في الملف")}`;
+        container.appendChild(div);
+      }
+    }
+
+    function resetInspector() {
+      document.getElementById("detailsText").textContent =
+        "اختر عقدة أو رابطاً من المخطط لعرض الأطراف والروابط والآيات.";
+      document.getElementById("relationsList").innerHTML = "";
+      document.getElementById("versesList").innerHTML = "";
+    }
+
+    function clearHighlight() {
+      cy.elements().removeClass("dimmed highlighted");
+    }
+
+    function resolveOverlaps(nodesCollection) {
+      const nodes = nodesCollection.toArray();
+      const minDist = NODE_DIAMETER + MIN_GAP;
+
+      for (let iter = 0; iter < 60; iter++) {
+        let moved = false;
+        for (let i = 0; i < nodes.length; i++) {
+          for (let j = i + 1; j < nodes.length; j++) {
+            const p1 = nodes[i].position();
+            const p2 = nodes[j].position();
+            let dx = p2.x - p1.x;
+            let dy = p2.y - p1.y;
+            let dist = Math.hypot(dx, dy);
+            if (dist < minDist) {
+              moved = true;
+              if (dist < 0.001) {
+                dx = (i + 1) * 14;
+                dy = (j + 1) * 14;
+                dist = Math.hypot(dx, dy);
+              }
+              const overlap = (minDist - dist) / 2;
+              const nx = dx / dist;
+              const ny = dy / dist;
+              nodes[i].position({ x: p1.x - nx * overlap, y: p1.y - ny * overlap });
+              nodes[j].position({ x: p2.x + nx * overlap, y: p2.y + ny * overlap });
+            }
+          }
+        }
+        if (!moved) break;
+      }
+    }
+
+    function pullDistantComponentsCloser(visibleNodes) {
+      const all = visibleNodes.toArray();
+      if (all.length < 3) return;
+
+      const visited = new Set();
+      const components = [];
+
+      for (const n of all) {
+        if (visited.has(n.id())) continue;
+        const comp = [];
+        const stack = [n];
+        visited.add(n.id());
+        while (stack.length > 0) {
+          const cur = stack.pop();
+          comp.push(cur);
+          cur.neighborhood("node").forEach((nb) => {
+            if (nb.visible() && !visited.has(nb.id())) {
+              visited.add(nb.id());
+              stack.push(nb);
+            }
+          });
+        }
+        components.push(comp);
+      }
+
+      if (components.length <= 1) return;
+      components.sort((a, b) => b.length - a.length);
+      const mainComp = components[0];
+      let sumX = 0;
+      let sumY = 0;
+      for (const n of mainComp) {
+        sumX += n.position().x;
+        sumY += n.position().y;
+      }
+      const mainCx = sumX / mainComp.length;
+      const mainCy = sumY / mainComp.length;
+
+      for (let c = 1; c < components.length; c++) {
+        const sub = components[c];
+        let sx = 0;
+        let sy = 0;
+        for (const n of sub) {
+          sx += n.position().x;
+          sy += n.position().y;
+        }
+        const scx = sx / sub.length;
+        const scy = sy / sub.length;
+        const dx = scx - mainCx;
+        const dy = scy - mainCy;
+        const dist = Math.hypot(dx, dy);
+        const maxAllowed = 420;
+        if (dist > maxAllowed) {
+          const factor = maxAllowed / dist;
+          const targetCx = mainCx + dx * factor;
+          const targetCy = mainCy + dy * factor;
+          const shiftX = targetCx - scx;
+          const shiftY = targetCy - scy;
+          for (const n of sub) {
+            n.position({ x: n.position().x + shiftX, y: n.position().y + shiftY });
+          }
+        }
+      }
+    }
+
+    function focusSubset(targetNodes, targetEdges) {
+      clearHighlight();
+      const allTarget = targetNodes.union(targetEdges);
+      if (targetNodes.length === 0) return;
+
+      const outerNodes = cy.nodes(":visible").not(targetNodes);
+      cy.elements().not(allTarget).addClass("dimmed");
+      allTarget.addClass("highlighted");
+
+      const nCount = targetNodes.length;
+      const box = targetNodes.boundingBox();
+      const cx = (box.x1 + box.x2) / 2;
+      const cyPos = (box.y1 + box.y2) / 2;
+
+      if (nCount >= 2 && nCount <= 8) {
+        const radius = Math.max(95, nCount * 36);
+        targetNodes.forEach((node, i) => {
+          const angle = (2 * Math.PI * i) / nCount;
+          node.position({
+            x: cx + Math.cos(angle) * radius,
+            y: cyPos + Math.sin(angle) * radius
+          });
+        });
+      }
+
+      const exclusionRadius = Math.max(175, nCount * 46) + NODE_DIAMETER;
+      outerNodes.forEach((node) => {
+        const pos = node.position();
+        let dx = pos.x - cx;
+        let dy = pos.y - cyPos;
+        let dist = Math.hypot(dx, dy);
+        if (dist < exclusionRadius) {
+          if (dist < 0.001) {
+            dx = 1;
+            dy = 0;
+            dist = 1;
+          }
+          const nx = dx / dist;
+          const ny = dy / dist;
+          node.position({
+            x: cx + nx * exclusionRadius,
+            y: cyPos + ny * exclusionRadius
+          });
+        }
+      });
+
+      resolveOverlaps(cy.nodes(":visible"));
+
+      cy.animate({
+        fit: { eles: allTarget, padding: 120 },
+        duration: 320
+      });
+    }
+
+    function showNodeNeighborhood(node) {
+      selectedAnchorNodeId = node.id();
+      const hood = node.closedNeighborhood();
+      const connectedEdges = hood.edges();
+      const vIds = [];
+      const allRels = [];
+
+      connectedEdges.forEach((e) => {
+        for (const r of (e.data("relations") || [])) {
+          allRels.push({
+            source: e.data("source"),
+            target: e.data("target"),
+            action: r.action,
+            direct: r.direct,
+            verses: r.verses
+          });
+        }
+        for (const id of (e.data("verses") || [])) {
+          if (!vIds.includes(id)) vIds.push(id);
+        }
+      });
+
+      focusSubset(hood.nodes(), connectedEdges);
+
+      document.getElementById("detailsText").textContent =
+        `الكيان: ${node.data("label")} (${node.data("category")})\n` +
+        `عدد الروابط المدمجة: ${connectedEdges.length} • إجمالي العلاقات: ${allRels.length}`;
+      renderRelations(allRels);
+      renderVerses(vIds);
+    }
+
+    function showPairOnly(nodeA, nodeB) {
+      const pairNodes = cy.collection().merge(nodeA).merge(nodeB);
+      const pairEdges = cy.edges().filter((e) => {
+        const s = e.source().id();
+        const t = e.target().id();
+        return (s === nodeA.id() && t === nodeB.id()) || (s === nodeB.id() && t === nodeA.id());
+      });
+
+      const vIds = [];
+      const pairRels = [];
+
+      pairEdges.forEach((e) => {
+        for (const r of (e.data("relations") || [])) {
+          pairRels.push({
+            source: e.data("source"),
+            target: e.data("target"),
+            action: r.action,
+            direct: r.direct,
+            verses: r.verses
+          });
+        }
+        for (const id of (e.data("verses") || [])) {
+          if (!vIds.includes(id)) vIds.push(id);
+        }
+      });
+
+      focusSubset(pairNodes, pairEdges);
+
+      document.getElementById("detailsText").textContent =
+        `العلاقات بين: ${nodeA.data("label")} ↔ ${nodeB.data("label")}\n` +
+        `عدد الروابط المدمجة: ${pairEdges.length} • إجمالي العلاقات: ${pairRels.length}`;
+      renderRelations(pairRels);
+      renderVerses(vIds);
+    }
+
+    function applyFilters() {
+      const query = document.getElementById("searchInput").value.trim();
+      const mode = document.getElementById("linkTypeFilter").value;
+
+      cy.elements().forEach((ele) => {
+        let visible = true;
+        if (ele.isEdge()) {
+          if (mode === "direct" && !ele.data("hasDirect")) visible = false;
+          if (mode === "indirect" && !ele.data("hasIndirect")) visible = false;
+          if (
+            query &&
+            !ele.data("allActionsText").includes(query) &&
+            !ele.data("source").includes(query) &&
+            !ele.data("target").includes(query)
+          ) {
+            visible = false;
+          }
+        } else if (ele.isNode() && query) {
+          visible = ele.data("label").includes(query);
+        }
+        ele.style("display", visible ? "element" : "none");
+      });
+    }
+
+    function resetToDefaultView(animate = false) {
+      selectedAnchorNodeId = null;
+      clearHighlight();
+      resetInspector();
+      cy.layout({
+        name: "cose",
+        animate,
+        nodeRepulsion: 32000,
+        idealEdgeLength: 240,
+        edgeElasticity: 75,
+        gravity: 0.35,
+        padding: 60
+      }).run();
+      pullDistantComponentsCloser(cy.nodes(":visible"));
+      resolveOverlaps(cy.nodes(":visible"));
+      cy.fit(cy.elements(":visible"), 60);
+    }
+
+    async function init() {
+      const statusEl = document.getElementById("status");
+      try {
+        const qRes = await fetch("quran_verses.json");
+        if (qRes.ok) {
+          const verses = await qRes.json();
+          for (const v of verses) {
+            if (v.id) versesById[v.id] = v;
+          }
+        }
+      } catch (_) {}
+
+      let graphData = fallbackGraph;
+      let loadedCustomGraph = false;
+      try {
+        const gRes = await fetch("graph_data.json");
+        if (gRes.ok) {
+          graphData = await gRes.json();
+          loadedCustomGraph = true;
+        }
+      } catch (_) {}
+
+      const elements = buildMergedElements(graphData);
+      cy = cytoscape({
+        container: document.getElementById("cy"),
+        elements,
+        style: [
+          {
+            selector: "node",
+            style: {
+              "background-color": "#0284c7",
+              "label": "data(label)",
+              "color": "#f8fafc",
+              "text-valign": "center",
+              "text-halign": "center",
+              "font-size": "14px",
+              "font-weight": "700",
+              "text-wrap": "wrap",
+              "text-max-width": "48px",
+              "width": NODE_DIAMETER,
+              "height": NODE_DIAMETER,
+              "z-index": 10
+            }
+          },
+          {
+            selector: "edge",
+            style: {
+              "width": "mapData(count, 1, 8, 2, 5.5)",
+              "line-color": "#94a3b8",
+              "target-arrow-color": "#94a3b8",
+              "target-arrow-shape": "triangle",
+              "curve-style": "bezier",
+              "z-index": 5
+            }
+          },
+          {
+            selector: "edge[!hasDirect]",
+            style: {
+              "line-style": "dashed",
+              "line-color": "#f59e0b",
+              "target-arrow-color": "#f59e0b"
+            }
+          },
+          {
+            selector: ".dimmed",
+            style: {
+              "opacity": 0.16,
+              "z-index": 1
+            }
+          },
+          {
+            selector: "node.highlighted",
+            style: {
+              "background-color": HIGHLIGHT_COLOR,
+              "border-color": "#ffedd5",
+              "border-width": 3,
+              "opacity": 1,
+              "z-index": 30
+            }
+          },
+          {
+            selector: "edge.highlighted",
+            style: {
+              "line-color": HIGHLIGHT_COLOR,
+              "target-arrow-color": HIGHLIGHT_COLOR,
+              "opacity": 1,
+              "z-index": 25
+            }
+          }
+        ],
+        layout: { name: "cose", animate: false }
+      });
+
+      resetToDefaultView(false);
+
+      cy.on("tap", (evt) => {
+        if (evt.target === cy) {
+          selectedAnchorNodeId = null;
+          clearHighlight();
+          resetInspector();
+          cy.animate({
+            fit: { eles: cy.elements(":visible"), padding: 60 },
+            duration: 300
+          });
+        }
+      });
+
+      cy.on("tap", "node", (evt) => {
+        const clickedNode = evt.target;
+
+        if (selectedAnchorNodeId && selectedAnchorNodeId !== clickedNode.id()) {
+          const anchorNode = cy.getElementById(selectedAnchorNodeId);
+          const areDirectlyConnected =
+            anchorNode.length > 0 &&
+            anchorNode.neighborhood("node").some((nb) => nb.id() === clickedNode.id());
+
+          if (areDirectlyConnected) {
+            showPairOnly(anchorNode, clickedNode);
+            return;
+          }
+        }
+
+        showNodeNeighborhood(clickedNode);
+      });
+
+      cy.on("tap", "edge", (evt) => {
+        const edge = evt.target;
+        selectedAnchorNodeId = null;
+        const rels = edge.data("relations") || [];
+        const pairNodes = cy.collection().merge(edge.source()).merge(edge.target());
+        focusSubset(pairNodes, cy.collection().merge(edge));
+
+        document.getElementById("detailsText").textContent =
+          `الأطراف: ${edge.data("source")} ← ${edge.data("target")}\n` +
+          `عدد العلاقات بينهما: ${rels.length}`;
+        renderRelations(rels);
+        renderVerses(edge.data("verses") || []);
+      });
+
+      document.getElementById("searchInput").addEventListener("input", applyFilters);
+      document.getElementById("linkTypeFilter").addEventListener("change", applyFilters);
+      document.getElementById("resetBtn").addEventListener("click", () => {
+        document.getElementById("searchInput").value = "";
+        document.getElementById("linkTypeFilter").value = "all";
+        applyFilters();
+        resetToDefaultView(true);
+      });
+
+      statusEl.textContent = loadedCustomGraph
+        ? `تم تحميل graph_data.json (${(graphData.nodes || []).length} عقدة)`
+        : "وضع العرض التجريبي (لم يتم العثور على graph_data.json بعد)";
+    }
+
+    init();
+  </script>
+</body>
+</html>
